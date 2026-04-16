@@ -31,6 +31,16 @@ markdown_extensions:
 nav:
   - Overview: index.md
   - Getting Started: getting-started.md
+  - Contributing:
+      - Overview: contributing/index.md
+      - Adding an SCM Provider: contributing/adding-an-scm-provider.md
+      - Continuous Integration: contributing/ci.md
+      - Cutting a Release: contributing/cutting-a-release.md
+      - Using Finalizers: contributing/using-finalizers.md
+  - Security: security.md
+  - Debugging:
+      - Overview: debugging/index.md
+      - Finalizers: debugging/finalizers.md
   - Architecture: architecture.md
   - Custom Hydrator: custom-hydrator.md
   - CRD Specs: crd-specs.md
@@ -59,3 +69,4 @@ plugins:
   - redirects:
       redirect_maps:
         'metrics.md': 'monitoring/metrics.md' # Page was moved to a subdirectory.
+        'contributing.md': 'contributing/index.md' # Page was moved to a subdirectory.
