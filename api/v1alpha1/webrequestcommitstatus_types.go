@@ -162,6 +162,20 @@ type OutputSpec struct {
 }
 
 // TriggerModeSpec defines expression-based trigger configuration.
+//
+// Delivery semantics: the controller dedupes HTTP requests by comparing fresh state
+// against state it persisted in WebRequestCommitStatus.status on the PREVIOUS reconcile
+// (TriggerOutput, ResponseOutput, SuccessOutput, LastRequestTime, LastSuccessfulShas).
+// That state is written via Server-Side Apply at the END of a reconcile and read from
+// the controller's informer cache at the START of the next reconcile. Under cache-
+// propagation lag, controller restarts, or status-write retries, a reconcile may not
+// see the most recently persisted state and may re-fire the HTTP request even though
+// the trigger would otherwise have been false.
+//
+// Treat WebRequestCommitStatus as AT-LEAST-ONCE HTTP delivery, not exactly-once. Make
+// external endpoints idempotent for the same (branch, sha) input. Don't use trigger
+// output to count attempts authoritatively (counters built on TriggerOutput are
+// eventually-consistent and may briefly observe a stale older value under cache lag).
 type TriggerModeSpec struct {
 	// RequeueDuration specifies how long to wait before requeuing to re-evaluate the trigger expression.
 	// +optional
@@ -179,6 +193,14 @@ type TriggerModeSpec struct {
 
 // WhenWithOutputSpec holds a when condition (boolean expression) and optional output (map expression).
 type WhenWithOutputSpec struct {
+	// Variables optionally holds an expression that runs before Expression and Output.Expression.
+	// It receives the same variables as Expression (see Expression documentation below) and must return a map/object.
+	// The result is injected as top-level binding Variables (map) for Expression and Output.Expression only — use Variables.<key> in those expressions.
+	// The Variables binding is not set when spec.variables is omitted. It is not available to response.output.expression or to Go templates.
+	//
+	// +optional
+	Variables *OutputSpec `json:"variables,omitempty"`
+
 	// Expression is a boolean expr expression that decides whether the HTTP request should be made.
 	// It is evaluated BEFORE each potential HTTP request. When it returns true the request is made;
 	// when false the controller keeps the previous phase and skips the request.
@@ -191,6 +213,7 @@ type WhenWithOutputSpec struct {
 	//   - TriggerOutput (map[string]any): custom data from the previous when.output.expression evaluation
 	//   - ResponseOutput (map[string]any): response data from the previous HTTP request (if any)
 	//   - SuccessOutput (map[string]any): custom data from the previous success.when.output.expression evaluation
+	//   - Variables (map[string]any): when spec.variables is set, the map returned by variables.expression this reconcile; omitted otherwise
 	//
 	// Note: PromotionStrategy.Status.Environments is an ordered array representing the promotion sequence.
 	// Use Branch + filter/find to look up environment-specific data:
@@ -218,13 +241,19 @@ type WhenWithOutputSpec struct {
 	// and is available in the next reconcile as TriggerOutput in when.expression, when.output.expression, and in templates.
 	// Use it to track state such as attempt counts, last-seen SHAs, or timestamps.
 	//
+	// Delivery semantics caveat: persisted output is read from the controller's informer cache at the start of the next
+	// reconcile. Under cache-propagation lag, controller restarts, or status-write retries, the next reconcile may not
+	// see the most recently persisted output and may re-fire the HTTP request. Treat this as AT-LEAST-ONCE delivery —
+	// counters built on TriggerOutput are eventually-consistent (a stale read can cause a duplicate increment), so use
+	// them for backoff hints, not for hard "fail after N attempts" gates.
+	//
 	// Variables are the same as for Expression (see above). The expression must return a map/object; every key is stored in TriggerOutput.
 	//
 	// Examples:
-	//   # Track SHA to detect changes
+	//   # Track SHA to detect changes (idempotent: replays produce the same trackedSha for the same input)
 	//   - "{ trackedSha: find(PromotionStrategy.Status.Environments, {.Branch == Branch}).Proposed.Hydrated.Sha }"
 	//
-	//   # Increment attempt counter
+	//   # Increment attempt counter (eventually-consistent; may briefly under-count under cache lag)
 	//   - "{ attemptCount: (TriggerOutput[\"attemptCount\"] ?? 0) + 1 }"
 	//
 	// +optional
@@ -333,6 +362,13 @@ type HTTPRequestSpec struct {
 
 // WebRequestCommitStatusStatus defines the observed state of WebRequestCommitStatus.
 type WebRequestCommitStatusStatus struct {
+	// ObservedGeneration is the .metadata.generation that this status was reconciled from.
+	// Because status is written via Server-Side Apply with ForceOwnership (which has no
+	// optimistic-concurrency check), this field is the canonical way to detect stale
+	// status writes: compare status.observedGeneration with metadata.generation.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Environments holds the status of each environment when context is "environments".
 	// When context is "promotionstrategy", this slice is empty and PromotionStrategyContext is used instead.
 	// +listType=map
@@ -524,6 +560,11 @@ type WebRequestCommitStatusList struct {
 // GetConditions returns the conditions of the WebRequestCommitStatus.
 func (wrcs *WebRequestCommitStatus) GetConditions() *[]metav1.Condition {
 	return &wrcs.Status.Conditions
+}
+
+// SetObservedGeneration records the object generation that produced the current status.
+func (wrcs *WebRequestCommitStatus) SetObservedGeneration(generation int64) {
+	wrcs.Status.ObservedGeneration = generation
 }
 
 func init() {
