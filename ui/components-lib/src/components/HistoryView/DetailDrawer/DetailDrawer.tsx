@@ -1,7 +1,14 @@
 import React from 'react';
-import { FaTimesCircle, FaTimes, FaBan, FaArrowRight } from 'react-icons/fa';
-import { GoGitPullRequest } from 'react-icons/go';
-import { timeAgo, formatDate, getCommitUrl, formatDuration } from '@shared/utils/util';
+import { FaTimes, FaArrowRight } from 'react-icons/fa';
+import { GoGitPullRequest, GoGitCommit } from 'react-icons/go';
+import {
+  timeAgo,
+  formatDate,
+  getCommitUrl,
+  formatDuration,
+  extractNameOnly,
+  extractBodyPreTrailer,
+} from '@shared/utils/util';
 import type { CellState, CommitRow, EnvColumn, HealthKey } from '../types';
 import { DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH, HEALTH_LABELS, healthIcon } from '../presentation';
 
@@ -22,7 +29,6 @@ const DetailDrawer: React.FC<{
   row,
   cell,
   branch,
-  envs,
   rowsById,
   width,
   isResizing,
@@ -48,21 +54,13 @@ const DetailDrawer: React.FC<{
   const passingChecks = cell.commitStatuses.filter((s) => s.phase === 'success');
   const pendingChecks = cell.commitStatuses.filter((s) => s.phase === 'pending');
 
-  const presence = envs
-    .map((e) => ({ env: e, cell: row.cells[e.branch] }))
-    .filter((x) => x.cell.kind !== 'no-changes');
+  // Checks on a cell are active OR proposed by kind: an in-flight cell is the
+  // open PR (proposed), everything else reflects the merged/live dry commit.
+  const checksLabel = cell.kind === 'in-flight' ? 'Proposed' : 'Active';
 
-  const envIdx = envs.findIndex((e) => e.branch === branch);
-  const upstream = envs
-    .slice(0, envIdx)
-    .reverse()
-    .find((e) => {
-      const k = row.cells[e.branch].kind;
-      return k === 'live' || k === 'was-here';
-    });
-  const downstreamNotReached = envs
-    .slice(envIdx + 1)
-    .filter((e) => row.cells[e.branch].kind === 'no-changes');
+  const hydrated = cell.hydrated;
+  const hydratedRepoName = hydrated?.repoURL?.replace(/\.git$/, '').split('/').pop();
+  const refs = cell.references ?? [];
 
   return (
     <aside
@@ -162,7 +160,74 @@ const DetailDrawer: React.FC<{
               </>
             )}
           </div>
+          {hydrated?.sha && (
+            <div className="hp-drawer__deployed">
+              Deployed as{' '}
+              {hydrated.repoURL ? (
+                <a
+                  href={getCommitUrl(hydrated.repoURL, hydrated.sha)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hp-drawer__deployed-sha"
+                  aria-label={`Hydrated commit ${hydrated.sha.slice(0, 7)}, opens in new tab`}
+                >
+                  {hydrated.sha.slice(0, 7)}
+                </a>
+              ) : (
+                <span className="hp-drawer__deployed-sha">{hydrated.sha.slice(0, 7)}</span>
+              )}
+              {hydratedRepoName && (
+                <span className="hp-drawer__deployed-repo"> ({hydratedRepoName})</span>
+              )}
+            </div>
+          )}
         </div>
+
+        {refs.length > 0 && (
+          <div className="hp-drawer__section">
+            <h3>Changes included ({refs.length})</h3>
+            <ul className="hp-drawer__refs">
+              {refs.map((ref, i) => {
+                const body = ref.body ? extractBodyPreTrailer(ref.body) : '';
+                return (
+                  <li key={ref.sha ?? i} className="hp-drawer__ref">
+                    <div className="hp-drawer__ref-subject">
+                      {(ref.subject ?? '').trim() || '(no subject)'}
+                    </div>
+                    <div className="hp-drawer__ref-meta">
+                      <span className="hp-drawer__ref-author">
+                        {ref.author ? extractNameOnly(ref.author) : '—'}
+                      </span>
+                      {ref.sha && (
+                        <>
+                          <span className="hp-drawer__sep" aria-hidden="true">
+                            ·
+                          </span>
+                          {ref.url ? (
+                            <a
+                              href={ref.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="hp-drawer__ref-sha"
+                              aria-label={`Source commit ${ref.sha.slice(0, 7)}, opens in new tab`}
+                            >
+                              <GoGitCommit aria-hidden="true" /> {ref.sha.slice(0, 7)}
+                            </a>
+                          ) : (
+                            <span className="hp-drawer__ref-sha">
+                              <GoGitCommit aria-hidden="true" /> {ref.sha.slice(0, 7)}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {body && <pre className="hp-drawer__ref-body">{body}</pre>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {cell.kind === 'failed' && failingChecks.length > 0 && (
           <div className="hp-drawer__section hp-drawer__section--danger">
@@ -201,6 +266,7 @@ const DetailDrawer: React.FC<{
         {cell.commitStatuses.length > 0 && cell.kind !== 'failed' && (
           <div className="hp-drawer__section">
             <h3>Checks</h3>
+            <p className="hp-drawer__checks-group-label">{checksLabel}</p>
             <ul className="hp-drawer__checks">
               {[...passingChecks, ...pendingChecks, ...failingChecks].map((c) => (
                 <li key={c.key} className={`hp-drawer__check hp-drawer__check--${c.phase}`}>
@@ -224,56 +290,6 @@ const DetailDrawer: React.FC<{
             <pre className="hp-drawer__body">{row.body}</pre>
           </div>
         )}
-
-        <div className="hp-drawer__section">
-          <h3>This commit across environments</h3>
-          <ul className="hp-drawer__presence">
-            {envs.map((e) => {
-              const c = row.cells[e.branch];
-              const isHere = e.branch === branch;
-              return (
-                <li
-                  key={e.branch}
-                  className={[
-                    'hp-drawer__presence-item',
-                    `hp-drawer__presence-item--${c.kind}`,
-                    isHere ? 'hp-drawer__presence-item--current' : '',
-                  ].join(' ')}
-                >
-                  <span className="hp-drawer__presence-branch">{e.branch}</span>
-                  <span className={`cell__pill cell__pill--${c.kind}`}>
-                    {c.kind === 'live' && 'LIVE'}
-                    {c.kind === 'in-flight' && (c.isProposed ? 'PROPOSED' : 'PR OPEN')}
-                    {c.kind === 'was-here' && 'WAS HERE'}
-                    {c.kind === 'failed' && (
-                      <>
-                        <FaTimesCircle aria-hidden="true" /> FAILED
-                      </>
-                    )}
-                    {c.kind === 'no-op' && (
-                      <>
-                        <FaBan aria-hidden="true" /> NO-OP
-                      </>
-                    )}
-                    {c.kind === 'no-changes' && '—'}
-                  </span>
-                  {c.at && <span className="hp-drawer__presence-time">{timeAgo(c.at)}</span>}
-                </li>
-              );
-            })}
-          </ul>
-          {presence.length === 1 && downstreamNotReached.length > 0 && (
-            <p className="hp-drawer__hint">
-              This commit only reached <strong>{branch}</strong>. It hasn't moved on to{' '}
-              {downstreamNotReached.map((e) => e.branch).join(', ')}.
-            </p>
-          )}
-          {upstream && (
-            <p className="hp-drawer__hint">
-              Promoted here from <strong>{upstream.branch}</strong>.
-            </p>
-          )}
-        </div>
 
         {cell.kind === 'was-here' && cell.supersededById && rowsById.get(cell.supersededById) && (
           <div className="hp-drawer__section">

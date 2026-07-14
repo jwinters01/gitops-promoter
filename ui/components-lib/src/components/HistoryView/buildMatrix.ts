@@ -1,8 +1,28 @@
 import { extractNameOnly, extractBodyPreTrailer, getCommitUrl } from '@shared/utils/util';
-import type { Commit, PromotionStrategy, PullRequest } from '@shared/types/promotion';
+import type {
+  Commit,
+  PromotionStrategy,
+  PullRequest,
+  ReferenceCommit,
+} from '@shared/types/promotion';
 import { LANE_COLORS } from './types';
 import type { CellKind, CellState, CommitRow, EnvColumn } from './types';
 import { healthFromStatuses, shortSha, commitKey } from './helpers';
+
+/**
+ * Pull the upstream code commits registered on a dry commit into `ReferenceCommit[]`,
+ * attaching a resolved `url` per ref (refs are cross-repo, so each carries its own
+ * `repoURL`). Empty refs (config-only changes) yield an empty array.
+ */
+function toReferenceCommits(dry: Commit | undefined): ReferenceCommit[] {
+  return (dry?.references ?? [])
+    .map((r) => r.commit)
+    .filter((c): c is NonNullable<typeof c> => !!c)
+    .map((c) => ({
+      ...c,
+      url: c.repoURL && c.sha ? getCommitUrl(c.repoURL, c.sha) : undefined,
+    }));
+}
 
 type StatusEnvironment = NonNullable<
   NonNullable<PromotionStrategy['status']>['environments']
@@ -132,6 +152,8 @@ function processHistory(rowsById: Map<string, CommitRow>, env: StatusEnvironment
     setCell(row, branch, {
       kind,
       commit,
+      hydrated: entry.active?.hydrated,
+      references: toReferenceCommits(commit),
       commitStatuses: statuses,
       health,
       pullRequest: entry.pullRequest,
@@ -215,6 +237,8 @@ export function buildMatrix(strategy: PromotionStrategy): {
         setCell(row, branch, {
           kind,
           commit: env.active.dry,
+          hydrated: env.active.hydrated,
+          references: toReferenceCommits(env.active.dry),
           commitStatuses: statuses,
           health,
           pullRequest: env.pullRequest,
@@ -232,6 +256,8 @@ export function buildMatrix(strategy: PromotionStrategy): {
         setCell(row, branch, {
           kind,
           commit: env.proposed.dry,
+          hydrated: env.proposed.hydrated,
+          references: toReferenceCommits(env.proposed.dry),
           commitStatuses: statuses,
           health,
           pullRequest: env.pullRequest,
