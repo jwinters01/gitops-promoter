@@ -1,5 +1,5 @@
 import React from 'react';
-import { FaTimes, FaArrowRight } from 'react-icons/fa';
+import { FaTimesCircle, FaTimes, FaBan, FaArrowRight } from 'react-icons/fa';
 import { GoGitPullRequest, GoGitCommit } from 'react-icons/go';
 import {
   timeAgo,
@@ -11,6 +11,7 @@ import {
 } from '@shared/utils/util';
 import type { CellState, CommitRow, EnvColumn, HealthKey } from '../types';
 import { DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH, HEALTH_LABELS, healthIcon } from '../presentation';
+import Tooltip from '../Tooltip/Tooltip';
 
 const DetailDrawer: React.FC<{
   row: CommitRow | null;
@@ -25,10 +26,12 @@ const DetailDrawer: React.FC<{
   onResizeTo: (width: number) => void;
   onClose: () => void;
   onJumpToRow: (id: string) => void;
+  onSelectCell: (branch: string) => void;
 }> = ({
   row,
   cell,
   branch,
+  envs,
   rowsById,
   width,
   isResizing,
@@ -37,6 +40,7 @@ const DetailDrawer: React.FC<{
   onResizeTo,
   onClose,
   onJumpToRow,
+  onSelectCell,
 }) => {
   if (!row || !cell || !branch) {
     return (
@@ -54,12 +58,13 @@ const DetailDrawer: React.FC<{
   const passingChecks = cell.commitStatuses.filter((s) => s.phase === 'success');
   const pendingChecks = cell.commitStatuses.filter((s) => s.phase === 'pending');
 
-  // Checks on a cell are active OR proposed by kind: an in-flight cell is the
-  // open PR (proposed), everything else reflects the merged/live dry commit.
-  const checksLabel = cell.kind === 'in-flight' ? 'Proposed' : 'Active';
+  const checksLabel = cell.isProposed ? 'Proposed' : 'Active';
 
   const hydrated = cell.hydrated;
-  const hydratedRepoName = hydrated?.repoURL?.replace(/\.git$/, '').split('/').pop();
+  const hydratedRepoURL = hydrated?.repoURL || cell.commit?.repoURL || row.repoUrl || '';
+  const hydratedRepoName = hydratedRepoURL
+    ? hydratedRepoURL.replace(/\.git$/, '').split('/').pop()
+    : undefined;
   const refs = cell.references ?? [];
 
   return (
@@ -107,7 +112,7 @@ const DetailDrawer: React.FC<{
             <span className={`hp-drawer__kind hp-drawer__kind--${cell.kind}`}>
               {cell.kind === 'live' && 'LIVE'}
               {cell.kind === 'in-flight' && (cell.isProposed ? 'PROPOSED' : 'PR OPEN')}
-              {cell.kind === 'was-here' && 'WAS HERE'}
+              {cell.kind === 'was-here' && 'REPLACED'}
               {cell.kind === 'failed' && 'FAILED'}
               {cell.kind === 'no-op' && 'NO-OP'}
               {cell.kind === 'no-changes' && 'NO CHANGES'}
@@ -119,17 +124,21 @@ const DetailDrawer: React.FC<{
             <span className="hp-drawer__author">{row.author}</span>
             <span className="hp-drawer__sep">·</span>
             {row.repoUrl && row.dryShaFull ? (
-              <a
-                href={getCommitUrl(row.repoUrl, row.dryShaFull)}
-                target="_blank"
-                rel="noreferrer"
-                className="hp-drawer__sha"
-                aria-label={`Commit ${row.dryShaShort}, opens in new tab`}
-              >
-                {row.dryShaShort}
-              </a>
+              <Tooltip label="Dry commit">
+                <a
+                  href={getCommitUrl(row.repoUrl, row.dryShaFull)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hp-drawer__sha"
+                  aria-label={`Dry commit ${row.dryShaShort}, opens in new tab`}
+                >
+                  {row.dryShaShort}
+                </a>
+              </Tooltip>
             ) : (
-              <span className="hp-drawer__sha">{row.dryShaShort}</span>
+              <Tooltip label="Dry commit">
+                <span className="hp-drawer__sha">{row.dryShaShort}</span>
+              </Tooltip>
             )}
             {row.prId && (
               <>
@@ -150,7 +159,9 @@ const DetailDrawer: React.FC<{
             {ago && (
               <>
                 <span className="hp-drawer__sep">·</span>
-                <span title={exact}>{ago}</span>
+                <Tooltip label={exact}>
+                  <span>{ago}</span>
+                </Tooltip>
               </>
             )}
             {cell.kind === 'was-here' && cell.liveDurationMs != null && (
@@ -163,18 +174,22 @@ const DetailDrawer: React.FC<{
           {hydrated?.sha && (
             <div className="hp-drawer__deployed">
               Deployed as{' '}
-              {hydrated.repoURL ? (
-                <a
-                  href={getCommitUrl(hydrated.repoURL, hydrated.sha)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hp-drawer__deployed-sha"
-                  aria-label={`Hydrated commit ${hydrated.sha.slice(0, 7)}, opens in new tab`}
-                >
-                  {hydrated.sha.slice(0, 7)}
-                </a>
+              {hydratedRepoURL ? (
+                <Tooltip label="Hydrated commit">
+                  <a
+                    href={getCommitUrl(hydratedRepoURL, hydrated.sha)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hp-drawer__deployed-sha"
+                    aria-label={`Hydrated commit ${hydrated.sha.slice(0, 7)}, opens in new tab`}
+                  >
+                    {hydrated.sha.slice(0, 7)}
+                  </a>
+                </Tooltip>
               ) : (
-                <span className="hp-drawer__deployed-sha">{hydrated.sha.slice(0, 7)}</span>
+                <Tooltip label="Hydrated commit">
+                  <span className="hp-drawer__deployed-sha">{hydrated.sha.slice(0, 7)}</span>
+                </Tooltip>
               )}
               {hydratedRepoName && (
                 <span className="hp-drawer__deployed-repo"> ({hydratedRepoName})</span>
@@ -185,7 +200,7 @@ const DetailDrawer: React.FC<{
 
         {refs.length > 0 && (
           <div className="hp-drawer__section">
-            <h3>Changes included ({refs.length})</h3>
+            <h3>app commits ({refs.length})</h3>
             <ul className="hp-drawer__refs">
               {refs.map((ref, i) => {
                 const body = ref.body ? extractBodyPreTrailer(ref.body) : '';
@@ -229,33 +244,6 @@ const DetailDrawer: React.FC<{
           </div>
         )}
 
-        {cell.kind === 'failed' && failingChecks.length > 0 && (
-          <div className="hp-drawer__section hp-drawer__section--danger">
-            <h3>Why it failed</h3>
-            <ul>
-              {failingChecks.map((c) => (
-                <li key={c.key}>
-                  <strong>{c.key}</strong>
-                  {c.description ? <> — {c.description}</> : null}
-                  {c.url && (
-                    <>
-                      {' '}
-                      <a
-                        href={c.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`View details for ${c.key}, opens in new tab`}
-                      >
-                        View details
-                      </a>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {cell.kind === 'no-op' && cell.noopNote && (
           <div className="hp-drawer__section hp-drawer__section--muted">
             <h3>Why it's a no-op</h3>
@@ -263,7 +251,7 @@ const DetailDrawer: React.FC<{
           </div>
         )}
 
-        {cell.commitStatuses.length > 0 && cell.kind !== 'failed' && (
+        {cell.commitStatuses.length > 0 && (
           <div className="hp-drawer__section">
             <h3>Checks</h3>
             <p className="hp-drawer__checks-group-label">{checksLabel}</p>
@@ -290,6 +278,67 @@ const DetailDrawer: React.FC<{
             <pre className="hp-drawer__body">{row.body}</pre>
           </div>
         )}
+
+        <div className="hp-drawer__section">
+          <h3>This commit across environments</h3>
+          <ul className="hp-drawer__presence">
+            {envs.map((e) => {
+              const c = row.cells[e.branch];
+              const isHere = e.branch === branch;
+              const selectable = !isHere && c.kind !== 'no-changes';
+              const inner = (
+                <>
+                  <span className="hp-drawer__presence-branch">{e.branch}</span>
+                  <span className={`cell__pill cell__pill--${c.kind}`}>
+                    {c.kind === 'live' && 'LIVE'}
+                    {c.kind === 'in-flight' && (c.isProposed ? 'PROPOSED' : 'PR OPEN')}
+                    {c.kind === 'was-here' && 'REPLACED'}
+                    {c.kind === 'failed' && (
+                      <>
+                        <FaTimesCircle aria-hidden="true" /> FAILED
+                      </>
+                    )}
+                    {c.kind === 'no-op' && (
+                      <>
+                        <FaBan aria-hidden="true" /> NO-OP
+                      </>
+                    )}
+                    {c.kind === 'no-changes' && '—'}
+                  </span>
+                  {c.at && (
+                    <Tooltip label={formatDate(c.at)}>
+                      <span className="hp-drawer__presence-time">{timeAgo(c.at)}</span>
+                    </Tooltip>
+                  )}
+                </>
+              );
+              const className = [
+                'hp-drawer__presence-item',
+                `hp-drawer__presence-item--${c.kind}`,
+                isHere ? 'hp-drawer__presence-item--current' : '',
+                selectable ? 'hp-drawer__presence-item--selectable' : '',
+              ].join(' ');
+              return (
+                <li key={e.branch}>
+                  {selectable ? (
+                    <button
+                      type="button"
+                      className={className}
+                      onClick={() => onSelectCell(e.branch)}
+                      aria-label={`View ${e.branch} details for this commit`}
+                    >
+                      {inner}
+                    </button>
+                  ) : (
+                    <div className={className} aria-current={isHere ? 'true' : undefined}>
+                      {inner}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
         {cell.kind === 'was-here' && cell.supersededById && rowsById.get(cell.supersededById) && (
           <div className="hp-drawer__section">

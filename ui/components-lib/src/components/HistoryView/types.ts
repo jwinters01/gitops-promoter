@@ -20,6 +20,7 @@ export interface CellState {
   supersededById?: string;
   at?: string;
   liveDurationMs?: number;
+  replacedAt?: string;
 }
 
 export interface EnvColumn {

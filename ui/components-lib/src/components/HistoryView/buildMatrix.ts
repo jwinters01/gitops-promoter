@@ -143,7 +143,10 @@ function processHistory(rowsById: Map<string, CommitRow>, env: StatusEnvironment
       idx > 0 ? (commitKey(history[idx - 1]?.active?.dry) ?? undefined) : undefined;
 
     const wentLive = wentLiveAt(entry);
-    const replacedAt = idx > 0 ? wentLiveAt(history[idx - 1]) : null;
+    const replacer = idx > 0 ? history[idx - 1] : undefined;
+    const replacedAt = wentLiveAt(replacer);
+    const replacedAtRaw =
+      replacer?.pullRequest?.prMergeTime ?? replacer?.active?.dry?.commitTime ?? undefined;
     const liveDurationMs =
       wentLive != null && replacedAt != null && replacedAt > wentLive
         ? replacedAt - wentLive
@@ -162,6 +165,7 @@ function processHistory(rowsById: Map<string, CommitRow>, env: StatusEnvironment
         : undefined,
       supersededById,
       liveDurationMs,
+      replacedAt: replacedAtRaw,
       at: commit.commitTime ?? entry.pullRequest?.prMergeTime ?? undefined,
     });
   });
