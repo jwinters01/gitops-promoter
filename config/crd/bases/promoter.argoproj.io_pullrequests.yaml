@@ -232,6 +232,15 @@ spec:
               id:
                 description: ID the id of the pull request
                 type: string
+              instanceID:
+                description: |-
+                  InstanceID mirrors metadata.labels[promoter.argoproj.io/instance-id] stamped on each
+                  reconcile attempt by this install's controller, including when Ready=False; omitted
+                  when the resource has no instance-id label (default install).
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$
+                type: string
               observedGeneration:
                 description: |-
                   ObservedGeneration is the .metadata.generation that this status was reconciled from.
@@ -243,6 +252,11 @@ spec:
               prCreationTime:
                 description: PRCreationTime the time the PR was created
                 format: date-time
+                type: string
+              scmSyncedSpecDigest:
+                description: |-
+                  SCMSyncedSpecDigest fingerprints title and description last successfully synced
+                  to the SCM via provider.Update on an open pull request.
                 type: string
               state:
                 description: State of the merge request closed/merged/open

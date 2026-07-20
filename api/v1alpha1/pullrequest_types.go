@@ -120,12 +120,26 @@ type PullRequestStatus struct {
 	// preserved in the owning ChangeTransferPolicy to maintain a record.
 	ExternallyMergedOrClosed *bool `json:"externallyMergedOrClosed,omitempty"`
 
+	// SCMSyncedSpecDigest fingerprints title and description last successfully synced
+	// to the SCM via provider.Update on an open pull request.
+	// +optional
+	SCMSyncedSpecDigest string `json:"scmSyncedSpecDigest,omitempty"`
+
 	// Conditions Represents the observations of the current state.
 	// +patchMergeKey=type
 	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// InstanceID mirrors metadata.labels[promoter.argoproj.io/instance-id] stamped on each
+	// reconcile attempt by this install's controller, including when Ready=False; omitted
+	// when the resource has no instance-id label (default install).
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$`
+	InstanceID *string `json:"instanceID,omitempty"`
 }
 
 // GetConditions returns the conditions of the PullRequest.
@@ -136,6 +150,11 @@ func (ps *PullRequest) GetConditions() *[]metav1.Condition {
 // SetObservedGeneration records the object generation that produced the current status.
 func (ps *PullRequest) SetObservedGeneration(generation int64) {
 	ps.Status.ObservedGeneration = generation
+}
+
+// SetStatusInstanceID records the instance-id label mirrored into status on each reconcile attempt.
+func (ps *PullRequest) SetStatusInstanceID(v *string) {
+	ps.Status.InstanceID = v
 }
 
 // +kubebuilder:ac:generate=true
